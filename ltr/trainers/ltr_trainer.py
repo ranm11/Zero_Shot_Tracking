@@ -29,7 +29,7 @@ class LTRTrainer(BaseTrainer):
         tensorboard_writer_dir = os.path.join(self.settings.env.tensorboard_dir, self.settings.project_path)
         self.tensorboard_writer = TensorboardWriter(tensorboard_writer_dir, [l.name for l in loaders])
 
-        self.move_data_to_gpu = getattr(settings, 'move_data_to_gpu', True)
+        self.move_data_to_gpu = getattr(settings, 'move_data_to_gpu', False) # GPU_EN
 
     def _set_default_settings(self):
         # Dict of all default values

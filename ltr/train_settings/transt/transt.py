@@ -1,5 +1,5 @@
 import torch
-from ltr.dataset import Lasot, MSCOCOSeq, Got10k, TrackingNet
+from ltr.dataset import Lasot
 from ltr.data import processing, sampler, LTRLoader
 import ltr.models.tracking.transt as transt_models
 from ltr import actors
@@ -10,7 +10,7 @@ from ltr import MultiGPU
 
 def run(settings):
     # Most common settings are assigned in the settings struct
-    settings.device = 'cuda'
+    settings.device = 'cpu'  #'cuda'
     settings.description = 'TransT with default settings.'
     settings.batch_size = 38
     settings.num_workers = 4
@@ -37,9 +37,9 @@ def run(settings):
 
     # Train datasets
     lasot_train = Lasot(settings.env.lasot_dir, split='train')
-    got10k_train = Got10k(settings.env.got10k_dir, split='vottrain')
-    trackingnet_train = TrackingNet(settings.env.trackingnet_dir, set_ids=list(range(4)))
-    coco_train = MSCOCOSeq(settings.env.coco_dir)
+    got10k_train = []#Got10k(settings.env.got10k_dir, split='vottrain')
+    trackingnet_train = []#TrackingNet(settings.env.trackingnet_dir, set_ids=list(range(4)))
+    coco_train =[]# MSCOCOSeq(settings.env.coco_dir)
 
     # The joint augmentation transform, that is applied to the pairs jointly
     transform_joint = tfm.Transform(tfm.ToGrayscale(probability=0.05))

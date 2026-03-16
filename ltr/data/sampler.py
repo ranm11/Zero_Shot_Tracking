@@ -89,7 +89,8 @@ class TrackingSampler(torch.utils.data.Dataset):
         """
 
         # Select a dataset
-        dataset = random.choices(self.datasets, self.p_datasets)[0]
+        # dataset = random.choices(self.datasets, self.p_datasets)[0]
+        dataset = self.datasets[0]
         is_video_dataset = dataset.is_video_sequence()
 
         # Sample a sequence with enough visible frames

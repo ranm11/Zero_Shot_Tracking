@@ -10,7 +10,7 @@ def local_env_settings():
     settings.got_packed_results_path = '/home/cx/TransT/pytracking/tracking_results/got_packed_results/'
     settings.got_reports_path = ''
     settings.lasot_path = '/home/cx/cx3/LaSOTBenchmark'
-    settings.network_path = 'C:\\Users\\User\\Documents\\dev\\TransT\\pytracking\\networks'    # Where tracking networks are stored.
+    settings.network_path = 'C:\\Users\\User\\Documents\\dev\\transt_git_2\\pytracking\\networks'    # Where tracking networks are stored.
     settings.nfs_path = '/home/cx/cx2/Downloads/nfs'
     settings.otb_path = '/home/cx/cx2/OTB100'
     settings.result_plot_path = '/home/cx/TransT/pytracking/result_plots/'
