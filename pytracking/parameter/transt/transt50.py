@@ -5,7 +5,7 @@ def parameters():
     params = TrackerParams()
     params.debug = 0
     params.visualization = False
-    params.use_gpu = False
+    params.use_gpu = True  #False
     params.net = NetWithBackbone(net_path='transt.pth',
                                  use_gpu=params.use_gpu)
     return params
