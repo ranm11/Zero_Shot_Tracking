@@ -5,6 +5,9 @@ have your pre-trained transt.pth under pytracking/network
 then run_video.py
 
 
+for cuda env :
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
 
  PS G:\Old_Disk\Documents\Develpos\Zero_shot_track\Zero_Shot_Tracking> python .\run_training.py
 
