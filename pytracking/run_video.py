@@ -22,7 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run the tracker on input video')
     parser.add_argument('tracker_name', type=str, nargs='?', default='transt', help='Name of tracking method.')
     parser.add_argument('tracker_param', type=str, nargs='?', default='transt50', help='Name of parameter file.')
-    parser.add_argument('videofile', type=str, nargs='?', default=r'..\zero_shot_track\People - 6387.mp4', help='path to a video file.')
+    parser.add_argument('videofile', type=str, nargs='?', default=r'..\\People - 6387.mp4', help='path to a video file.')
     parser.add_argument('--optional_box', type=float, nargs="+",default=[50,100,120,50], help='optional_box with format x y w h.')
     parser.add_argument('--debug', type=int, default=0, help='Debug level.')
     parser.add_argument('--save_results', dest='save_results', action='store_true', help='Save bounding boxes')
