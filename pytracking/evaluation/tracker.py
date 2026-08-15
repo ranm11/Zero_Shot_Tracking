@@ -304,8 +304,36 @@ class Tracker:
 
             # Draw box
             out = tracker.track(frame)
-            state = [int(s) for s in out['target_bbox'][1]]
+            if isinstance(out.get('target_bbox'), (OrderedDict, dict)):
+                state = [int(s) for s in next(iter(out['target_bbox'].values()))]
+            else:
+                state = [int(s) for s in out['target_bbox']]
             output_boxes.append(state)
+
+            if tracker.params.debug > 0:
+                heatmap = out.get('debug_heatmap')
+                region = out.get('debug_heatmap_region')
+                if isinstance(heatmap, (OrderedDict, dict)):
+                    heatmap = next(iter(heatmap.values()))
+                if isinstance(region, (OrderedDict, dict)):
+                    region = next(iter(region.values()))
+                if heatmap is not None and region is not None:
+                    if isinstance(region, (list, tuple, np.ndarray)) and len(region) == 4:
+                        x0, y0, heat_w, heat_h = region
+                        heatmap_resized = cv.resize(heatmap.astype(np.float32), (int(heat_w), int(heat_h)),
+                                                   interpolation=cv.INTER_LINEAR)
+                        heatmap_color = cv.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv.COLORMAP_JET)
+
+                        x1 = max(0, int(x0))
+                        y1 = max(0, int(y0))
+                        x2 = min(frame_disp.shape[1], int(x0) + int(heat_w))
+                        y2 = min(frame_disp.shape[0], int(y0) + int(heat_h))
+
+                        if x2 > x1 and y2 > y1:
+                            heat_crop = heatmap_color[max(0, -int(y0)):max(0, -int(y0)) + (y2 - y1),
+                                                      max(0, -int(x0)):max(0, -int(x0)) + (x2 - x1)]
+                            roi = frame_disp[y1:y2, x1:x2]
+                            frame_disp[y1:y2, x1:x2] = cv.addWeighted(roi, 0.55, heat_crop, 0.45, 0)
 
             cv.rectangle(frame_disp, (state[0], state[1]), (state[2] + state[0], state[3] + state[1]),
                          (0, 255, 0), 5)

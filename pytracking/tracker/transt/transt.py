@@ -90,6 +90,24 @@ class TransT(SiameseTracker):
         score = self._convert_score(outputs['pred_logits'])
         pred_bbox = self._convert_bbox(outputs['pred_boxes'])
 
+        # Compute a spatial score map for debugging overlays. The decoder outputs one confidence value per
+        # spatial token in the search region; for a 256px search crop this is typically a 32x32 grid (1024 tokens).
+        if getattr(self.params, 'debug', 0) > 0:
+            grid_size = int(round(np.sqrt(score.size)))
+            if grid_size * grid_size != score.size:
+                raise ValueError(f'Cannot build a square attention heatmap from {score.size} logits.')
+            score_map = score.reshape(grid_size, grid_size).astype(np.float32)
+            score_map = (score_map - score_map.min()) / (score_map.max() - score_map.min() + 1e-8)
+            crop_x = int(round(self.center_pos[0] - s_x / 2.0))
+            crop_y = int(round(self.center_pos[1] - s_x / 2.0))
+            out = {'target_bbox': None,
+                   'best_score': None,
+                   'debug_heatmap': score_map,
+                   'debug_heatmap_region': (crop_x, crop_y, int(round(s_x)), int(round(s_x)))}
+        else:
+            out = {'target_bbox': None,
+                   'best_score': None}
+
         # def change(r):
         #     return np.maximum(r, 1. / r)
         #
@@ -138,6 +156,6 @@ class TransT(SiameseTracker):
                 width,
                 height]
 
-        out = {'target_bbox': bbox,
-               'best_score': pscore}
+        out['target_bbox'] = bbox
+        out['best_score'] = pscore
         return out
