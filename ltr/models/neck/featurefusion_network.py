@@ -37,7 +37,7 @@ class FeatureFusionNetwork(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src_temp, mask_temp, src_search, mask_search, pos_temp, pos_search):
+    def forward(self, src_temp, mask_temp, src_search, mask_search, pos_temp, pos_search, debug=False):
         src_temp = src_temp.flatten(2).permute(2, 0, 1)
         pos_temp = pos_temp.flatten(2).permute(2, 0, 1)
         src_search = src_search.flatten(2).permute(2, 0, 1)
@@ -50,10 +50,20 @@ class FeatureFusionNetwork(nn.Module):
                                                   src2_key_padding_mask=mask_search,
                                                   pos_src1=pos_temp,
                                                   pos_src2=pos_search)
+
+        if debug:
+            hs, decoder_attn = self.decoder(memory_search, memory_temp,
+                                           tgt_key_padding_mask=mask_search,
+                                           memory_key_padding_mask=mask_temp,
+                                           pos_enc=pos_temp, pos_dec=pos_search,
+                                           debug=debug)
+            return hs.unsqueeze(0).transpose(1, 2), decoder_attn
+
         hs = self.decoder(memory_search, memory_temp,
-                          tgt_key_padding_mask=mask_search,
-                          memory_key_padding_mask=mask_temp,
-                          pos_enc=pos_temp, pos_dec=pos_search)
+                         tgt_key_padding_mask=mask_search,
+                         memory_key_padding_mask=mask_temp,
+                         pos_enc=pos_temp, pos_dec=pos_search,
+                         debug=debug)
         return hs.unsqueeze(0).transpose(1, 2)
 
 
@@ -70,19 +80,32 @@ class Decoder(nn.Module):
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos_enc: Optional[Tensor] = None,
-                pos_dec: Optional[Tensor] = None):
+                pos_dec: Optional[Tensor] = None,
+                debug: bool = False):
         output = tgt
+        attn_maps = []
 
         for layer in self.layers:
-            output = layer(output, memory, tgt_mask=tgt_mask,
-                           memory_mask=memory_mask,
-                           tgt_key_padding_mask=tgt_key_padding_mask,
-                           memory_key_padding_mask=memory_key_padding_mask,
-                           pos_enc=pos_enc, pos_dec=pos_dec)
+            if debug:
+                output, attn_map = layer(output, memory, tgt_mask=tgt_mask,
+                                        memory_mask=memory_mask,
+                                        tgt_key_padding_mask=tgt_key_padding_mask,
+                                        memory_key_padding_mask=memory_key_padding_mask,
+                                        pos_enc=pos_enc, pos_dec=pos_dec, debug=debug)
+                attn_maps.append(attn_map)
+            else:
+                output = layer(output, memory, tgt_mask=tgt_mask,
+                               memory_mask=memory_mask,
+                               tgt_key_padding_mask=tgt_key_padding_mask,
+                               memory_key_padding_mask=memory_key_padding_mask,
+                               pos_enc=pos_enc, pos_dec=pos_dec)
 
         if self.norm is not None:
             output = self.norm(output)
 
+        if debug:
+            attn_map = attn_maps[-1] if attn_maps else None
+            return output, attn_map
         return output
 
 class Encoder(nn.Module):
@@ -134,23 +157,66 @@ class DecoderCFALayer(nn.Module):
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
+    def _reduce_attention_map(self, attn_weights):
+        """
+        Reduce attention weights to a 1D spatial heatmap.
+        attn_weights shape from MultiheadAttention: (tgt_len, memory_len)
+        We sum across the query dimension to get attention per memory token.
+        """
+        if attn_weights is None:
+            return None
+
+        weights = attn_weights.detach()
+        
+        # attn_weights from MultiheadAttention(average_attn_weights=True) is (tgt_len, memory_len)
+        # Sum across query (rows) to get importance per memory token
+        if weights.dim() == 2:
+            # Shape: (num_queries, num_memory_tokens)
+            # Sum over queries to get per-memory-token attention strength
+            heatmap = weights.sum(dim=0)  # shape: (num_memory_tokens,)
+            return heatmap
+        
+        # Fallback: try to flatten to 1D
+        if weights.dim() > 2:
+            weights = weights.view(-1)
+        
+        if weights.dim() == 1:
+            return weights
+        
+        return None
+
     def forward_post(self, tgt, memory,
                      tgt_mask: Optional[Tensor] = None,
                      memory_mask: Optional[Tensor] = None,
                      tgt_key_padding_mask: Optional[Tensor] = None,
                      memory_key_padding_mask: Optional[Tensor] = None,
                      pos_enc: Optional[Tensor] = None,
-                     pos_dec: Optional[Tensor] = None):
+                     pos_dec: Optional[Tensor] = None,
+                     debug: bool = False):
 
-        tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, pos_dec),
-                                   key=self.with_pos_embed(memory, pos_enc),
-                                   value=memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)[0]
+        if debug:
+            attn_output = self.multihead_attn(query=self.with_pos_embed(tgt, pos_dec),
+                                             key=self.with_pos_embed(memory, pos_enc),
+                                             value=memory, attn_mask=memory_mask,
+                                             key_padding_mask=memory_key_padding_mask,
+                                             need_weights=True,
+                                             average_attn_weights=True)
+            tgt2, attn_weights = attn_output
+            attn_map = self._reduce_attention_map(attn_weights)
+        else:
+            tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, pos_dec),
+                                      key=self.with_pos_embed(memory, pos_enc),
+                                      value=memory, attn_mask=memory_mask,
+                                      key_padding_mask=memory_key_padding_mask)[0]
+            attn_map = None
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
+        if debug:
+            return tgt, attn_map
+
         return tgt
 
 
@@ -160,10 +226,11 @@ class DecoderCFALayer(nn.Module):
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos_enc: Optional[Tensor] = None,
-                pos_dec: Optional[Tensor] = None):
+                pos_dec: Optional[Tensor] = None,
+                debug: bool = False):
 
         return self.forward_post(tgt, memory, tgt_mask, memory_mask,
-                                 tgt_key_padding_mask, memory_key_padding_mask, pos_enc, pos_dec)
+                                 tgt_key_padding_mask, memory_key_padding_mask, pos_enc, pos_dec, debug=debug)
 
 class FeatureFusionLayer(nn.Module):
 

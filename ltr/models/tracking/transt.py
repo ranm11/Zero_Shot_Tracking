@@ -1,6 +1,7 @@
 import torch.nn as nn
 from ltr import model_constructor
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from util import box_ops
@@ -25,11 +26,44 @@ class TransT(nn.Module):
         """
         super().__init__()
         self.featurefusion_network = featurefusion_network
+        self.debug = 0
         hidden_dim = featurefusion_network.d_model
         self.class_embed = MLP(hidden_dim, hidden_dim, num_classes + 1, 3)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
+
+    @staticmethod
+    def _attention_to_heatmap(attn_map):
+        """Convert 1D attention vector to 2D spatial heatmap."""
+        if attn_map is None:
+            return None
+
+        # Convert tensor to numpy
+        if hasattr(attn_map, 'cpu'):
+            map_array = attn_map.detach().cpu().numpy()
+        else:
+            map_array = attn_map
+        
+        if map_array.ndim != 1:
+            print(f"[debug] Attention map has unexpected shape: {map_array.shape}")
+            return None
+
+        # Compute grid size
+        grid_size = int(round(np.sqrt(map_array.size)))
+        if grid_size * grid_size != map_array.size:
+            print(f"[debug] Cannot reshape {map_array.size} elements into square grid. size={map_array.size}, grid_size={grid_size}")
+            return None
+
+        # Reshape and normalize
+        heatmap = map_array.reshape(grid_size, grid_size).astype(np.float32)
+        h_min, h_max = heatmap.min(), heatmap.max()
+        if h_max > h_min:
+            heatmap = (heatmap - h_min) / (h_max - h_min)
+        else:
+            heatmap = np.ones_like(heatmap) * 0.5
+        
+        return heatmap
 
     def forward(self, search, template):
         """ The forward expects a NestedTensor, which consists of:
@@ -56,7 +90,17 @@ class TransT(nn.Module):
         assert mask_search is not None
         src_template, mask_template = feature_template[-1].decompose()
         assert mask_template is not None
-        hs = self.featurefusion_network(self.input_proj(src_template), mask_template, self.input_proj(src_search), mask_search, pos_template[-1], pos_search[-1])
+        if self.debug >= 2:
+            hs, decoder_attn = self.featurefusion_network(self.input_proj(src_template), mask_template,
+                                                         self.input_proj(src_search), mask_search,
+                                                         pos_template[-1], pos_search[-1], debug=True)
+            debug_heatmap = self._attention_to_heatmap(decoder_attn)
+            if debug_heatmap is not None:
+                out = {'pred_logits': self.class_embed(hs)[-1], 'pred_boxes': self.bbox_embed(hs).sigmoid()[-1],
+                       'debug_attention': debug_heatmap}
+                return out
+        hs = self.featurefusion_network(self.input_proj(src_template), mask_template, self.input_proj(src_search), mask_search,
+                                       pos_template[-1], pos_search[-1])
 
         outputs_class = self.class_embed(hs)
         outputs_coord = self.bbox_embed(hs).sigmoid()
@@ -73,6 +117,33 @@ class TransT(nn.Module):
         assert mask_search is not None
         src_template, mask_template = feature_template[-1].decompose()
         assert mask_template is not None
+
+        debug = getattr(self, 'debug', 0)
+        print(f"[TransT.track] debug={debug}")
+        if debug == 1:
+            hs = self.featurefusion_network(self.input_proj(src_template), mask_template, self.input_proj(src_search), mask_search, pos_template[-1], pos_search[-1])
+            outputs_class = self.class_embed(hs)
+            outputs_coord = self.bbox_embed(hs).sigmoid()
+            out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+            print(f"[TransT.track] debug=1 path, no attention")
+            return out
+
+        if debug >= 2:
+            print(f"[TransT.track] debug={debug} path, requesting attention")
+            hs, decoder_attn = self.featurefusion_network(self.input_proj(src_template), mask_template,
+                                                         self.input_proj(src_search), mask_search,
+                                                         pos_template[-1], pos_search[-1], debug=True)
+            outputs_class = self.class_embed(hs)
+            outputs_coord = self.bbox_embed(hs).sigmoid()
+            heatmap = self._attention_to_heatmap(decoder_attn)
+            out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+            if heatmap is not None:
+                print(f"[TransT.track] Extracted attention heatmap with shape {heatmap.shape}")
+                out['debug_attention'] = heatmap
+            else:
+                print(f"[TransT.track] Failed to extract attention heatmap")
+            return out
+
         hs = self.featurefusion_network(self.input_proj(src_template), mask_template, self.input_proj(src_search), mask_search, pos_template[-1], pos_search[-1])
 
         outputs_class = self.class_embed(hs)

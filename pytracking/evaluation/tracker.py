@@ -320,19 +320,35 @@ class Tracker:
                 if heatmap is not None and region is not None:
                     if isinstance(region, (list, tuple, np.ndarray)) and len(region) == 4:
                         x0, y0, heat_w, heat_h = region
-                        heatmap_resized = cv.resize(heatmap.astype(np.float32), (int(heat_w), int(heat_h)),
-                                                   interpolation=cv.INTER_LINEAR)
-                        heatmap_color = cv.applyColorMap((heatmap_resized * 255).astype(np.uint8), cv.COLORMAP_JET)
 
+                        # Desired full heatmap size for the region (integers)
+                        H = int(round(heat_h))
+                        W = int(round(heat_w))
+
+                        # Resize with cubic interpolation and smooth to remove block artifacts
+                        heatmap_resized = cv.resize(heatmap.astype(np.float32), (W, H), interpolation=cv.INTER_CUBIC)
+                        # Apply small blur to smooth remaining grid artifacts
+                        if H > 2 and W > 2:
+                            heatmap_resized = cv.GaussianBlur(heatmap_resized, (5, 5), 0)
+
+                        # Convert to color map (clip values to [0,1])
+                        heatmap_color = cv.applyColorMap((np.clip(heatmap_resized, 0.0, 1.0) * 255).astype(np.uint8), cv.COLORMAP_JET)
+
+                        # Compute visible ROI inside the frame
                         x1 = max(0, int(x0))
                         y1 = max(0, int(y0))
-                        x2 = min(frame_disp.shape[1], int(x0) + int(heat_w))
-                        y2 = min(frame_disp.shape[0], int(y0) + int(heat_h))
+                        x2 = min(frame_disp.shape[1], int(x0) + W)
+                        y2 = min(frame_disp.shape[0], int(y0) + H)
 
                         if x2 > x1 and y2 > y1:
-                            heat_crop = heatmap_color[max(0, -int(y0)):max(0, -int(y0)) + (y2 - y1),
-                                                      max(0, -int(x0)):max(0, -int(x0)) + (x2 - x1)]
+                            # Corresponding crop inside the heatmap_color
+                            sx = max(0, -int(x0))
+                            sy = max(0, -int(y0))
+                            sw = x2 - x1
+                            sh = y2 - y1
+                            heat_crop = heatmap_color[sy:sy + sh, sx:sx + sw]
                             roi = frame_disp[y1:y2, x1:x2]
+                            # Blend with transparency
                             frame_disp[y1:y2, x1:x2] = cv.addWeighted(roi, 0.55, heat_crop, 0.45, 0)
 
             cv.rectangle(frame_disp, (state[0], state[1]), (state[2] + state[0], state[3] + state[1]),

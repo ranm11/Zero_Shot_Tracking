@@ -41,6 +41,13 @@ class TransT(SiameseTracker):
         self.initialize_features()
         # The DiMP network
         self.net = self.params.net
+        # Set debug level on the actual underlying network, not just the wrapper
+        debug_level = getattr(self.params, 'debug', 0)
+        if hasattr(self.net, 'net') and hasattr(self.net.net, 'debug'):
+            self.net.net.debug = debug_level
+        elif hasattr(self.net, 'debug'):
+            self.net.debug = debug_level
+        print(f"[TransT.initialize] Set debug={debug_level}")
         # Time initialization
         tic = time.time()
         bbox = info['init_bbox']
@@ -90,23 +97,50 @@ class TransT(SiameseTracker):
         score = self._convert_score(outputs['pred_logits'])
         pred_bbox = self._convert_bbox(outputs['pred_boxes'])
 
-        # Compute a spatial score map for debugging overlays. The decoder outputs one confidence value per
-        # spatial token in the search region; for a 256px search crop this is typically a 32x32 grid (1024 tokens).
-        if getattr(self.params, 'debug', 0) > 0:
-            grid_size = int(round(np.sqrt(score.size)))
-            if grid_size * grid_size != score.size:
-                raise ValueError(f'Cannot build a square attention heatmap from {score.size} logits.')
-            score_map = score.reshape(grid_size, grid_size).astype(np.float32)
+        # Get the actual debug level from the underlying network
+        debug_level = getattr(self.params, 'debug', 0)
+        if hasattr(self.net, 'net'):
+            actual_debug = getattr(self.net.net, 'debug', debug_level)
+        else:
+            actual_debug = debug_level
+        
+        # Compute a spatial debug map.
+        # debug=1: use the final class score map
+        # debug=2: use the decoder cross-attention heatmap ONLY (no fallback)
+        if actual_debug == 1:
+            score_map = score.reshape(int(np.sqrt(score.size)), int(np.sqrt(score.size))).astype(np.float32)
             score_map = (score_map - score_map.min()) / (score_map.max() - score_map.min() + 1e-8)
+            map_kind = 'score'
+        elif actual_debug >= 2:
+            if 'debug_attention' in outputs:
+                score_map = outputs['debug_attention']
+                map_kind = 'attention'
+                if score_map is not None:
+                    print(f"[TransT] Got attention heatmap with shape {score_map.shape}")
+                else:
+                    print(f"[TransT] debug_attention exists but is None")
+            else:
+                print(f"[TransT] debug_attention NOT in outputs. Keys: {outputs.keys()}")
+                score_map = None
+                map_kind = None
+        else:
+            score_map = None
+            map_kind = None
+
+        if actual_debug > 0 and score_map is not None:
             crop_x = int(round(self.center_pos[0] - s_x / 2.0))
             crop_y = int(round(self.center_pos[1] - s_x / 2.0))
             out = {'target_bbox': None,
                    'best_score': None,
                    'debug_heatmap': score_map,
-                   'debug_heatmap_region': (crop_x, crop_y, int(round(s_x)), int(round(s_x)))}
+                   'debug_heatmap_region': (crop_x, crop_y, int(round(s_x)), int(round(s_x))),
+                   'debug_heatmap_type': map_kind}
+            print(f"[TransT] Returning debug heatmap with type={map_kind}")
         else:
             out = {'target_bbox': None,
                    'best_score': None}
+            if actual_debug > 0:
+                print(f"[TransT] debug_level={actual_debug} but score_map is None")
 
         # def change(r):
         #     return np.maximum(r, 1. / r)
