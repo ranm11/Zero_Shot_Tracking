@@ -12,7 +12,7 @@ from typing import Optional
 
 import torch.nn.functional as F
 from torch import nn, Tensor
-
+import cv2
 
 class FeatureFusionNetwork(nn.Module):
 
@@ -167,21 +167,20 @@ class DecoderCFALayer(nn.Module):
             return None
 
         weights = attn_weights.detach()
-        
+        weights = weights[0]
         # attn_weights from MultiheadAttention(average_attn_weights=True) is (tgt_len, memory_len)
         # Sum across query (rows) to get importance per memory token
         if weights.dim() == 2:
             # Shape: (num_queries, num_memory_tokens)
             # Sum over queries to get per-memory-token attention strength
-            heatmap = weights.sum(dim=0)  # shape: (num_memory_tokens,)
+            att = weights.mean(dim=1)  # shape: (num_memory_tokens,)
+            att_reshaped = att.reshape(1, 1, 32, 32)  # (batch, channels, height, width)
+            # F.interpolate requires 4D input (N, C, H, W)
+            heatmap = F.interpolate(att_reshaped, size=(256, 256), mode='bilinear', align_corners=False)
+            heatmap = heatmap.squeeze()  # remove batch and channel dims to get (256, 256)
             return heatmap
         
-        # Fallback: try to flatten to 1D
-        if weights.dim() > 2:
-            weights = weights.view(-1)
         
-        if weights.dim() == 1:
-            return weights
         
         return None
 
