@@ -172,13 +172,13 @@ class DecoderCFALayer(nn.Module):
         # Sum across query (rows) to get importance per memory token
         if weights.dim() == 2:
             # Shape: (num_queries, num_memory_tokens)
-            # Sum over queries to get per-memory-token attention strength
-            att = weights.mean(dim=1)  # shape: (num_memory_tokens,)
-            att_reshaped = att.reshape(1, 1, 32, 32)  # (batch, channels, height, width)
+            att_reshape = weights.reshape(32,32,256)
+            att_max = att_reshape.max(dim=2) 
+            att_reshaped = att_max[0].reshape(1, 1, 32, 32)  # (batch, channels, height, width)
             # F.interpolate requires 4D input (N, C, H, W)
             heatmap = F.interpolate(att_reshaped, size=(256, 256), mode='bilinear', align_corners=False)
             heatmap = heatmap.squeeze()  # remove batch and channel dims to get (256, 256)
-            return heatmap
+            return heatmap.flatten()
         
         
         
