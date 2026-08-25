@@ -130,12 +130,17 @@ class TransT(SiameseTracker):
         if actual_debug > 0 and score_map is not None:
             crop_x = int(round(self.center_pos[0] - s_x / 2.0))
             crop_y = int(round(self.center_pos[1] - s_x / 2.0))
+            # Use actual heatmap dimensions, not search crop size
+            if isinstance(score_map, np.ndarray):
+                hm_h, hm_w = score_map.shape[-2:] if score_map.ndim >= 2 else (score_map.shape[0], score_map.shape[0])
+            else:
+                hm_h, hm_w = int(round(s_x)), int(round(s_x))
             out = {'target_bbox': None,
                    'best_score': None,
                    'debug_heatmap': score_map,
-                   'debug_heatmap_region': (crop_x, crop_y, int(round(s_x)), int(round(s_x))),
+                   'debug_heatmap_region': (crop_x, crop_y, hm_w, hm_h),
                    'debug_heatmap_type': map_kind}
-            print(f"[TransT] Returning debug heatmap with type={map_kind}")
+            print(f"[TransT] Returning debug heatmap with type={map_kind}, size=({hm_h}, {hm_w})")
         else:
             out = {'target_bbox': None,
                    'best_score': None}
